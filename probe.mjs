@@ -19,6 +19,7 @@ import { parse as parseDeepSeek, readBalance as readDeepSeek } from './deepseek.
 import { parse as parseOpenCode, readBalance as readOpenCode } from './opencode-go.mjs'
 import { parse as parseKimi, readBalance as readKimi } from './kimi-coding.mjs'
 import { parse as parseMiniMax, readBalance as readMiniMax } from './minimax.mjs'
+import { parse as parseGoat, readBalance as readGoat } from './command-code-goat.mjs'
 
 const checks = []
 /** Register one probe check. */
@@ -125,6 +126,45 @@ check('minimax: the language resources decide, per window, with a reset estimate
   )
 })
 
+check('command-code-goat: the tightest allowance decides, and an exceeded window reads zero', () => {
+  // The shape this endpoint answered with in this deployment, verbatim.
+  const payload = {
+    credits: { belowThreshold: false, creditThreshold: 0, monthlyCredits: 37.941019347, purchasedCredits: 0, freeCredits: 0 },
+    windowLimits: {
+      limited: true,
+      exceeded: null,
+      fiveHour: { used: 0, cap: 14, exceeded: false, resetAt: 0 },
+      weekly: { used: 32.058980653, cap: 35, exceeded: false, resetAt: 1_791_025_644_936 },
+    },
+    sandboxAccess: false,
+    sandboxMinutes: null,
+  }
+  const reading = parseGoat(payload)
+  assert.equal(Math.round(reading.remaining * 100) / 100, 2.94, 'the weekly window is the tightest')
+  assert.equal(reading.resetsAt, new Date(1_791_025_644_936).toISOString())
+  assert.equal(reading.error, undefined)
+  assert.match(reading.detail, /monthly 37\.94 left, five-hour 14 left, weekly 2\.94 left/)
+
+  const exhausted = parseGoat({
+    ...payload,
+    windowLimits: { ...payload.windowLimits, fiveHour: { used: 14, cap: 14, exceeded: true, resetAt: 1_791_000_000_000 } },
+  })
+  assert.equal(exhausted.remaining, 0)
+  assert.match(exhausted.error, /five-hour window is exhausted/)
+  assert.equal(exhausted.resetsAt, new Date(1_791_000_000_000).toISOString(), 'the exhausted window names the reset')
+
+  const flagged = parseGoat({ credits: { monthlyCredits: 5 }, windowLimits: { exceeded: { weekly: true } } })
+  assert.equal(flagged.remaining, 0)
+  assert.match(flagged.error, /exceeded window limit/)
+
+  const low = parseGoat({ credits: { monthlyCredits: 3, belowThreshold: true }, windowLimits: {} })
+  assert.equal(low.remaining, 3)
+  assert.match(low.error, /below its credit threshold/)
+
+  assert.throws(() => parseGoat({}), throws)
+  assert.throws(() => parseGoat({ credits: { monthlyCredits: 'none' }, windowLimits: {} }), throws)
+})
+
 let failed = 0
 for (const [name, body] of checks) {
   try {
@@ -142,6 +182,7 @@ const PROVIDERS = [
   ['opencode-go', readOpenCode, 'OPENCODE_API_KEY', 'https://opencode.ai/zen/go/v1'],
   ['kimi-coding', readKimi, 'KIMI_CODING_API_KEY', 'https://api.kimi.com/coding/v1'],
   ['minimax-cn', readMiniMax, 'MINIMAX_CN_API_KEY', 'https://www.minimax.cn'],
+  ['command-code-goat', readGoat, 'COMMAND_CODE_GOAT_API_KEY', 'https://api.commandcode.ai/alpha/billing'],
 ]
 
 if (process.argv.includes('--live')) {

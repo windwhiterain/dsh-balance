@@ -57,6 +57,11 @@ other file, and no script prints its credential.
         script: [!!js process.execPath, "C:/resource/dsh-balance/kimi-coding.mjs"]
         apiKeyEnv: KIMI_CODING_API_KEY
         minimumRemaining: 1
+      - provider: command-code-goat
+        script: [!!js process.execPath, "C:/resource/dsh-balance/command-code-goat.mjs"]
+        apiKeyEnv: COMMAND_CODE_GOAT_API_KEY
+        unit: usd-left
+        minimumRemaining: 1
 ```
 
 `!!js process.execPath` pins the interpreter to the one the host itself runs, so
@@ -75,15 +80,27 @@ route, so combine these with `pools` — see that plugin's README.
 | `opencode-go.mjs` | `opencode-go` | `OPENCODE_API_KEY` | `GET opencode.ai/zen/go/v1/usage` | `100 − max(percent used)` over the rolling, weekly, and monthly windows; a window marked `rate-limited` reads `0` | no — the call `dsh-opencode-go` itself makes |
 | `kimi-coding.mjs` | `kimi-coding` | `KIMI_CODING_API_KEY` | `GET api.kimi.com/coding/v1/usages` (404 falls back to `/v1/usage`) | the least remaining percentage across the limit rows, or the least remaining count when no row carries one | no — a community client's call |
 | `minimax.mjs` | `minimax-cn` | `MINIMAX_CN_API_KEY` (or `MINIMAX_TOKEN_PLAN_KEY`) | `GET www.minimax.cn/v1/token_plan/remains` | the smaller of the language-model resources' current-interval and weekly windows; `--model` narrows to one resource | endpoint only — the fields follow the community client |
+| `command-code-goat.mjs` | `command-code-goat` | `COMMAND_CODE_GOAT_API_KEY` | `GET api.commandcode.ai/alpha/billing/credits` | the **tightest** of the monthly credit and the five-hour and weekly windows, in dollars | endpoint only — the fields follow the response it answers with |
 
 `minimax.mjs` is a port of a `minimax_quota.py` console report written earlier
 for this deployment; both record the same reverse-engineered field names.
 
-**The providers left out have no balance endpoint at all**: `qwen`, `tencent`,
-`xiaomi`, and `command-code-goat` report an exhausted allowance only when a
-request fails. They need no script — the failure itself marks the provider
-unusable and the next route in the pool takes over — and a script for them would
-have nothing to read.
+### Two products, two keys
+
+`kimi-coding.mjs` reads the **Kimi Code subscription** plan, whose key is the
+`sk-kimi-…` one from the Kimi Code console and whose endpoint is
+`/coding/v1/usages`. The **Kimi open platform** is a different product with its
+own key and its own balance endpoint (`GET api.moonshot.cn/v1/users/me/balance`,
+answering `available_balance`/`voucher_balance`/`cash_balance`); the two keys are
+not interchangeable and mixing them answers `401`. This deployment uses the coding
+plan, so only that script exists here.
+
+### Providers left out
+
+`qwen`, `tencent`, and `xiaomi` publish no balance endpoint at all: they report an
+exhausted allowance only when a request fails. They need no script — the failure
+itself marks the provider unusable and the next route in the pool takes over — and
+a script for them would have nothing to read.
 
 ## Probe
 
