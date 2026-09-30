@@ -1,0 +1,12 @@
+{
+  "name": "dsh-balance",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Balance scripts for dsh-llm-quota-retry: one provider each, printing the reading that plugin's route pools decide with.",
+  "license": "MIT",
+  "author": "windwhiterain",
+  "scripts": {
+    "probe": "node probe.mjs"
+  }
+}
