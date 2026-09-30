@@ -4,8 +4,23 @@
   "private": true,
   "type": "module",
   "description": "Balance scripts for dsh-llm-quota-retry: one provider each, printing the reading that plugin's route pools decide with.",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "balance",
+    "quota",
+    "usage"
+  ],
   "license": "MIT",
   "author": "windwhiterain",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/windwhiterain/dsh-balance.git"
+  },
+  "homepage": "https://github.com/windwhiterain/dsh-balance#readme",
+  "bugs": {
+    "url": "https://github.com/windwhiterain/dsh-balance/issues"
+  },
   "scripts": {
     "probe": "node probe.mjs"
   }
