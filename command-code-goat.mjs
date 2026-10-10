@@ -18,7 +18,7 @@
  */
 
 import { pathToFileURL } from 'node:url'
-import { BalanceError, emitReading, getJson, readOptions, run } from './lib/contract.mjs'
+import { BalanceError, emitReading, getJson, readOptions, run, windowOf } from './lib/contract.mjs'
 
 const PROVIDER = 'command-code-goat'
 const BASE_URL = 'https://api.commandcode.ai/alpha/billing'
@@ -43,20 +43,22 @@ function cents(value) {
  * Read the least remaining allowance out of the credits response.
  * @param payload - the parsed response.
  * @returns the reading: dollars left of the tightest allowance, the instant that
- *   allowance resets, and a note naming each one.
+ *   allowance resets, a note naming each one, and one window per allowance. The
+ *   endpoint states a cap for the five-hour and weekly windows only, so the
+ *   monthly credit is reported without one and is never scored.
  * @throws {BalanceError} when no allowance carries a usable amount.
  */
 export function parse(payload) {
   const credits = payload?.credits
-  const windows = payload?.windowLimits
-  if (credits === null || typeof credits !== 'object' || windows === null || typeof windows !== 'object') {
+  const windowLimits = payload?.windowLimits
+  if (credits === null || typeof credits !== 'object' || windowLimits === null || typeof windowLimits !== 'object') {
     throw new BalanceError('the response carries no credits and windowLimits objects')
   }
   const limits = []
   const monthly = Number(credits.monthlyCredits)
   if (Number.isFinite(monthly)) limits.push({ name: 'monthly', left: Math.max(0, monthly) })
   for (const [label, key] of WINDOWS) {
-    const window = windows[key]
+    const window = windowLimits[key]
     if (window === null || typeof window !== 'object') continue
     const cap = Number(window.cap)
     const used = Number(window.used)
@@ -65,21 +67,27 @@ export function parse(payload) {
     limits.push({
       name: label,
       left: Math.max(0, cap - used),
+      cap,
       ...Number.isFinite(resetAt) && resetAt > 0 ? { resetAt } : {},
       exceeded: window.exceeded === true,
     })
   }
   if (limits.length === 0) throw new BalanceError('no credit or window allowance carries a usable amount')
+  const windows = limits.flatMap((limit) => {
+    const window = windowOf(limit.name, limit.left, limit.cap)
+    return window === undefined ? [] : [window]
+  })
   const tightest = limits.reduce((left, right) => (right.left < left.left ? right : left))
   const exhausted = limits.find(limit => limit.exceeded === true)
-  const flagged = windows.exceeded !== null && windows.exceeded !== undefined
+  const flagged = windowLimits.exceeded !== null && windowLimits.exceeded !== undefined
   return {
     remaining: exhausted === undefined && !flagged ? tightest.left : 0,
+    windows,
     ...tightest.resetAt === undefined ? {} : { resetsAt: new Date(tightest.resetAt).toISOString() },
     ...exhausted !== undefined
       ? { error: `the ${exhausted.name} window is exhausted` }
       : flagged
-        ? { error: `the provider reports an exceeded window limit (${JSON.stringify(windows.exceeded)})` }
+        ? { error: `the provider reports an exceeded window limit (${JSON.stringify(windowLimits.exceeded)})` }
         : credits.belowThreshold === true
           ? { error: 'the account is below its credit threshold' }
           : {},

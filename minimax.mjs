@@ -13,13 +13,14 @@
  * (`minimax-m*`, `general`) — the ones a model request actually spends — and
  * takes the smaller of its two windows. `--model <name>` narrows that to one
  * model's own resource instead, which is what a provider whose quota is
- * per-model wants when a pool holds more than one of them.
+ * per-model wants when a pool holds more than one of them. Every selected window
+ * is also reported on its own, under that window's label.
  *
  * @module dsh-balance/minimax
  */
 
 import { pathToFileURL } from 'node:url'
-import { BalanceError, emitReading, getJson, readOptions, run } from './lib/contract.mjs'
+import { BalanceError, emitReading, getJson, readOptions, run, windowOf } from './lib/contract.mjs'
 
 const PROVIDER = 'minimax-cn'
 const BASE_URL = 'https://www.minimax.cn'
@@ -51,11 +52,11 @@ function isLanguage(modelName) {
 }
 
 /**
- * One entry's windows, as readings.
+ * One entry's windows, as measurements.
  * @param entry - one `model_remains[]` entry.
  * @returns the windows that carry a percentage, each with its reset estimate.
  */
-function windowsOf(entry) {
+function reportedWindowsOf(entry) {
   return WINDOWS.flatMap(([label, totalKey, percentKey, remainsKey]) => {
     const percent = Number(entry?.[percentKey])
     if (!Number.isFinite(percent)) return []
@@ -99,16 +100,21 @@ export function parse(payload, { model } = {}) {
       ? 'no language-model quota resource is reported'
       : `no quota resource matches model "${model}"`)
   }
-  const windows = selected.flatMap((entry) => {
-    const windows = windowsOf(entry)
+  const reported = selected.flatMap((entry) => {
+    const windows = reportedWindowsOf(entry)
     return windows.map(window => ({ ...window, model: String(entry.model_name ?? '') }))
   })
-  if (windows.length === 0) throw new BalanceError('the selected resources carry no remaining-percent window')
-  const worst = windows.reduce((left, right) => (right.percent < left.percent ? right : left))
+  if (reported.length === 0) throw new BalanceError('the selected resources carry no remaining-percent window')
+  const worst = reported.reduce((left, right) => (right.percent < left.percent ? right : left))
+  const windows = reported.flatMap((window) => {
+    const entry = windowOf(window.label, Math.max(0, window.percent), 100)
+    return entry === undefined ? [] : [entry]
+  })
   return {
     remaining: Math.max(0, worst.percent),
+    windows,
     ...worst.resetsAt === undefined ? {} : { resetsAt: worst.resetsAt },
-    detail: windows.map(window => `${window.model} ${window.label} ${window.percent}%`).join(', '),
+    detail: reported.map(window => `${window.model} ${window.label} ${window.percent}%`).join(', '),
   }
 }
 

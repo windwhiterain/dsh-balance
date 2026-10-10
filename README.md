@@ -18,13 +18,30 @@ node probe.mjs --live           # also query every provider whose credential is 
 service and reads **one JSON object from stdout**:
 
 ```json
-{ "remaining": 42.5, "resetsAt": "2026-10-01T00:00:00Z", "error": "…", "detail": "…" }
+{
+  "remaining": 2.94,
+  "windows": [
+    { "name": "five-hour", "remaining": 14, "capacity": 14 },
+    { "name": "weekly", "remaining": 2.94, "capacity": 35 },
+    { "name": "monthly", "remaining": 37.94 }
+  ],
+  "resetsAt": "2026-10-01T00:00:00Z", "error": "…", "detail": "…"
+}
 ```
 
-- `remaining` — what the provider has left, in the unit the row's `unit` field
-  names. Percentage left for a metered plan, an amount for a wallet, a count for a
-  request quota.
-- `resetsAt` / `error` / `detail` — optional context; only `remaining` decides.
+- `remaining` — the collapsed number every reader decides on: what the provider
+  has left, in the unit the row's `unit` field names. Percentage left for a
+  metered plan, an amount for a wallet, a count for a request quota.
+- `windows` — optional; the usage windows `remaining` collapses. Each entry
+  carries the window's own `name`, stable across runs, what that window has left
+  in the script's own unit, and — when the provider states one — the window's
+  full allowance as `capacity`, in the same unit as its `remaining`.
+  `dsh-llm-quota-retry` ranks a route by its worst window,
+  `min(remaining / capacity)`; a window without a `capacity` (a prepaid wallet,
+  a limit the endpoint does not state) is context for a person and is never
+  scored.
+- `resetsAt` / `error` / `detail` — optional context for a person; none of them
+  changes a ranking.
 - Anything else on stdout, a non-zero exit, or a timeout is a **missing reading**
   for the plugin: it logs the first stderr line and treats the route as
   unreported, which `failOpen` decides the meaning of. A script never fails a
@@ -81,6 +98,15 @@ route, so combine these with `pools` — see that plugin's README.
 | `kimi-coding.mjs` | `kimi-coding` | `KIMI_CODING_API_KEY` | `GET api.kimi.com/coding/v1/usages` (404 falls back to `/v1/usage`) | the least remaining percentage across the limit rows, or the least remaining count when no row carries one | no — a community client's call |
 | `minimax.mjs` | `minimax-cn` | `MINIMAX_CN_API_KEY` (or `MINIMAX_TOKEN_PLAN_KEY`) | `GET www.minimax.cn/v1/token_plan/remains` | the smaller of the language-model resources' current-interval and weekly windows; `--model` narrows to one resource | endpoint only — the fields follow the community client |
 | `command-code-goat.mjs` | `command-code-goat` | `COMMAND_CODE_GOAT_API_KEY` | `GET api.commandcode.ai/alpha/billing/credits` | the **tightest** of the monthly credit and the five-hour and weekly windows, in dollars | endpoint only — the fields follow the response it answers with |
+
+Every script but `deepseek.mjs` also reports those allowances one window at a
+time: `opencode-go.mjs` its `rolling`, `weekly`, and `monthly` windows as percent
+left out of 100, `minimax.mjs` the `current` and `weekly` window of each selected
+resource under that window's own label, `kimi-coding.mjs` one window per usage
+row named `limit-1`, `limit-2`, … in row order, and `command-code-goat.mjs` its
+`monthly`, `five-hour`, and `weekly` allowances, of which only the last two carry
+the endpoint's `cap`. A prepaid wallet (`deepseek.mjs`) has no window: the pool
+row's own unit and threshold are what measure it.
 
 `minimax.mjs` is a port of a `minimax_quota.py` console report written earlier
 for this deployment; both record the same reverse-engineered field names.
