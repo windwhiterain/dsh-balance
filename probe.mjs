@@ -22,6 +22,7 @@ import { parse as parseOpenCode, readBalance as readOpenCode } from './opencode-
 import { parse as parseKimi, readBalance as readKimi } from './kimi-coding.mjs'
 import { parse as parseMiniMax, readBalance as readMiniMax } from './minimax.mjs'
 import { parse as parseGoat, readBalance as readGoat } from './command-code-goat.mjs'
+import { callGateway, cookieValue, parse as parseQwen, readBalance as readQwen, readSecToken } from './qwen.mjs'
 
 const checks = []
 /** Register one probe check. */
@@ -31,6 +32,33 @@ function check(name, body) {
 
 /** A response shape's `assert.throws` message matcher, for the failure cases. */
 const throws = /./
+
+/**
+ * A gateway that answers one JSON body per inner API and records the requests.
+ * @param bodies - inner API name -> the `DataV2.data` body to answer with.
+ * @returns the fetch implementation and the requests it saw.
+ */
+function fakeGateway(bodies) {
+  const requests = []
+  const fetch = (url, options = {}) => {
+    requests.push({ url: String(url), options })
+    const body = String(url).includes('tool/user/info.json')
+      ? { data: { secToken: 'csrf-from-console' } }
+      : { data: { DataV2: { data: { success: true, data: bodies[innerOf(options)] ?? {} } } } }
+    return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(body)) })
+  }
+  return { fetch, requests }
+}
+
+/**
+ * The inner API name of one recorded gateway request.
+ * @param options - the request's fetch options.
+ * @returns the last path segment of its `params.Api`.
+ */
+function innerOf(options) {
+  const params = JSON.parse(new URLSearchParams(options.body ?? '').get('params') ?? '{}')
+  return String(params.Api ?? '').split('/').pop()
+}
 
 check('contract: a window needs a stable name and a finite amount', () => {
   assert.deepEqual(windowOf('weekly', 2.94, 35), { name: 'weekly', remaining: 2.94, capacity: 35 })
@@ -213,6 +241,103 @@ check('command-code-goat: the tightest allowance decides, and an exceeded window
   assert.throws(() => parseGoat({ credits: { monthlyCredits: 'none' }, windowLimits: {} }), throws)
 })
 
+check('qwen: the console\'s used ratio becomes percent left, with the tier total as context', () => {
+  const quota = {
+    lite: { monthly: 11_500, five_hour: 3_000 },
+    standard: { monthly: 45_000, five_hour: 3_000 },
+    addon_quota: { extrabundle: 0 },
+  }
+  const reading = parseQwen(
+    { per1MonthPercentage: 0.349, per1MonthResetTime: 1_792_000_000_000 },
+    quota,
+    { specCode: 'standard', remainingDays: 22, endTime: 1_795_000_000_000 },
+  )
+  assert.equal(reading.remaining, 65.1, 'the plan meters a month, and reports what is left of it')
+  assert.deepEqual(reading.windows, [{ name: 'monthly', remaining: 65.1, capacity: 100 }])
+  assert.equal(reading.resetsAt, new Date(1_792_000_000_000).toISOString())
+  assert.equal(reading.error, undefined)
+  assert.match(reading.detail, /standard plan, 65\.1% left, of 45000 Credits/)
+  assert.match(reading.detail, /subscription ends 2026-11-18T/)
+
+  const legacy = parseQwen({ per1WeekPercentage: 1, per1WeekResetTime: '2026-10-20T03:00:00+08:00' })
+  assert.equal(legacy.remaining, 0, 'a subscription still metering a week reports that window')
+  assert.deepEqual(legacy.windows, [{ name: 'weekly', remaining: 0, capacity: 100 }])
+  assert.match(legacy.error, /weekly allowance is spent/)
+  assert.equal(legacy.resetsAt, new Date(Date.parse('2026-10-20T03:00:00+08:00')).toISOString())
+
+  const ratioOnly = parseQwen({ per1MonthPercentage: 0.5 })
+  assert.equal(ratioOnly.remaining, 50, 'a tier total this script could not read costs the Credits, not the reading')
+  assert.doesNotMatch(ratioOnly.detail, /Credits/)
+
+  assert.throws(() => parseQwen({}, quota, { specCode: 'standard' }), /meters no per1Month/)
+  assert.throws(() => parseQwen(undefined, quota), throws)
+})
+
+check('qwen: the gateway request carries the session, the CSRF token, and a browser identity', async () => {
+  assert.equal(cookieValue('a=1; sec_token=abc; cna=xyz', 'sec_token'), 'abc')
+  assert.equal(cookieValue('a=1', 'sec_token'), undefined)
+
+  const gateway = fakeGateway({ usage: { per1MonthPercentage: 0.25 } })
+  const { reading } = await readQwen({ key: 'a=1; cna=xyz', baseUrl: 'https://cs-data.example/data/api.json', timeoutMs: 5_000, fetch: gateway.fetch })
+  assert.equal(reading.remaining, 75)
+
+  const info = gateway.requests[0]
+  assert.match(info.url, /tool\/user\/info\.json$/)
+  assert.match(info.options.headers.cookie, /cna=xyz/)
+
+  const request = gateway.requests[1]
+  const query = new URL(request.url).searchParams
+  assert.equal(query.get('action'), 'BroadScopeAspnGateway')
+  assert.equal(query.get('product'), 'sfm_bailian')
+  assert.equal(query.get('api'), 'zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/usage')
+  assert.equal(query.get('_v'), 'undefined')
+  const form = new URLSearchParams(request.options.body)
+  assert.equal(form.get('action'), 'BroadScopeAspnGateway')
+  assert.equal(form.get('region'), 'cn-beijing')
+  assert.equal(form.get('sec_token'), 'csrf-from-console', 'the token comes from the console, not from the user')
+  const params = JSON.parse(form.get('params'))
+  assert.equal(params.Api, 'zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/usage')
+  assert.equal(params.V, '1.0')
+  assert.equal(params.Data.cornerstoneParam.consoleSite, 'QIANWENAI')
+  assert.equal(params.Data.cornerstoneParam['X-Anonymous-Id'], 'xyz', 'the console reads its own anonymous id out of the cookie')
+  assert.match(request.options.headers['user-agent'], /Mozilla\/5\.0/, 'the gateway refuses a custom user agent')
+  assert.equal(request.options.headers['content-type'], 'application/x-www-form-urlencoded')
+  assert.match(request.options.headers.referer, /token-plan\/individual$/)
+  assert.deepEqual(gateway.requests.slice(1).map(entry => innerOf(entry.options)), ['usage', 'quota-config', 'subscription'])
+})
+
+check('qwen: a refused session, an unknown envelope, and a missing token each report themselves', async () => {
+  const refused = (url) => Promise.resolve({
+    ok: true,
+    status: 200,
+    text: () => Promise.resolve(JSON.stringify({ data: { errorCode: 'BailianGateway.Login.NotLogined', errorMsg: 'nope' } })),
+  })
+  await assert.rejects(
+    () => callGateway('usage', { cookie: 'a=1', secToken: 't', timeoutMs: 1_000, fetch: refused }),
+    /the console session was refused/,
+  )
+
+  const empty = () => Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ code: '200' })) })
+  await assert.rejects(
+    () => callGateway('usage', { cookie: 'a=1', secToken: 't', timeoutMs: 1_000, fetch: empty }),
+    /answered no data body/,
+  )
+
+  const failing = () => Promise.resolve({ ok: false, status: 500, text: () => Promise.resolve('boom') })
+  await assert.rejects(
+    () => callGateway('usage', { cookie: 'a=1', secToken: 't', timeoutMs: 1_000, fetch: failing }),
+    /HTTP 500/,
+  )
+
+  const noToken = () => Promise.resolve({ ok: false, status: 401, text: () => Promise.resolve('') })
+  assert.equal(await readSecToken('a=1', { timeoutMs: 1_000, fetch: noToken }), undefined)
+  assert.equal(
+    await readSecToken('a=1', { timeoutMs: 1_000, fetch: () => Promise.reject(new Error('offline')) }),
+    undefined,
+    'a token call that cannot answer leaves the cookie\'s own sec_token to be used',
+  )
+})
+
 let failed = 0
 for (const [name, body] of checks) {
   try {
@@ -231,6 +356,8 @@ const PROVIDERS = [
   ['kimi-coding', readKimi, 'KIMI_CODING_API_KEY', 'https://api.kimi.com/coding/v1'],
   ['minimax-cn', readMiniMax, 'MINIMAX_CN_API_KEY', 'https://www.minimax.cn'],
   ['command-code-goat', readGoat, 'COMMAND_CODE_GOAT_API_KEY', 'https://api.commandcode.ai/alpha/billing'],
+  // `key` is the console session cookie here, not an API key.
+  ['qwen', readQwen, 'QWEN_CONSOLE_COOKIE', 'https://cs-data.qianwenai.com/data/api.json'],
 ]
 
 if (process.argv.includes('--live')) {
