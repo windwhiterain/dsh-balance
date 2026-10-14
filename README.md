@@ -62,7 +62,7 @@ writes any other file, and no script prints its credential.
   name: "dsh-llm-quota-retry"
   config:
     balances:
-      - provider: opencode-go
+      - provider: dsh-opencode-go
         script: [!!js process.execPath, "C:/resource/dsh-balance/opencode-go.mjs"]
         apiKeyEnv: OPENCODE_API_KEY
         unit: percent-left
@@ -87,6 +87,25 @@ writes any other file, and no script prints its credential.
 the script needs nothing on `PATH`; a plain `"node"` works too when it is
 installed system-wide.
 
+Every `script` path above is **absolute, and it is this machine's checkout** —
+nothing discovers these files for you. A profile that names a path you do not
+have fails to read that balance, so replace each one with a path into your own
+checkout of this repository.
+
+A provider whose script reports a single number rather than a set of windows —
+`deepseek.mjs` reports one CNY balance, so it needs `unit: cny-left` — is scored
+against the row's `capacity`, and an unscored route never takes part in ranking.
+Give it one, sized to your own top-up scale:
+
+```yaml
+      - provider: deepseek-official
+        script: [!!js process.execPath, "C:/resource/dsh-balance/deepseek.mjs"]
+        apiKeyEnv: DEEPSEEK_API_KEY
+        unit: cny-left
+        capacity: 300
+        minimumRemaining: 1
+```
+
 A balance entry changes nothing on its own: readings only matter to a route
 **pool**. A pool is what lets an exhausted provider hand a session to another
 route, so combine these with `pools` — see that plugin's README.
@@ -96,7 +115,7 @@ route, so combine these with `pools` — see that plugin's README.
 | Script | Provider id | Credential | Endpoint | `remaining` is | Documented? |
 |---|---|---|---|---|---|
 | `deepseek.mjs` | `deepseek-official` | `DEEPSEEK_API_KEY` | `GET api.deepseek.com/user/balance` | the CNY wallet's `total_balance` (the first wallet when there is no CNY one) | yes |
-| `opencode-go.mjs` | `opencode-go` | `OPENCODE_API_KEY` | `GET opencode.ai/zen/go/v1/usage` | `100 − max(percent used)` over the rolling, weekly, and monthly windows; a window marked `rate-limited` reads `0` | no — the call `dsh-opencode-go` itself makes |
+| `opencode-go.mjs` | `dsh-opencode-go` | `OPENCODE_API_KEY` | `GET opencode.ai/zen/go/v1/usage` | `100 − max(percent used)` over the rolling, weekly, and monthly windows; a window marked `rate-limited` reads `0` | no — the call `dsh-opencode-go` itself makes |
 | `kimi-coding.mjs` | `kimi-coding` | `KIMI_CODING_API_KEY` | `GET api.kimi.com/coding/v1/usages` (404 falls back to `/v1/usage`) | the least remaining percentage across the limit rows, or the least remaining count when no row carries one | no — a community client's call |
 | `minimax.mjs` | `minimax-cn` | `MINIMAX_CN_API_KEY` (or `MINIMAX_TOKEN_PLAN_KEY`) | `GET www.minimax.cn/v1/token_plan/remains` | the smaller of the language-model resources' current-interval and weekly windows; `--model` narrows to one resource | endpoint only — the fields follow the community client |
 | `command-code-goat.mjs` | `command-code-goat` | `COMMAND_CODE_GOAT_API_KEY` | `GET api.commandcode.ai/alpha/billing/credits` | the **tightest** of the monthly credit and the five-hour and weekly windows, in dollars | endpoint only — the fields follow the response it answers with |

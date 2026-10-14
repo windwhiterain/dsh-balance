@@ -352,7 +352,7 @@ for (const [name, body] of checks) {
 /** provider id, module entry, credential variable, and base URL override per script. */
 const PROVIDERS = [
   ['deepseek-official', readDeepSeek, 'DEEPSEEK_API_KEY', 'https://api.deepseek.com'],
-  ['opencode-go', readOpenCode, 'OPENCODE_API_KEY', 'https://opencode.ai/zen/go/v1'],
+  ['dsh-opencode-go', readOpenCode, 'OPENCODE_API_KEY', 'https://opencode.ai/zen/go/v1'],
   ['kimi-coding', readKimi, 'KIMI_CODING_API_KEY', 'https://api.kimi.com/coding/v1'],
   ['minimax-cn', readMiniMax, 'MINIMAX_CN_API_KEY', 'https://www.minimax.cn'],
   ['command-code-goat', readGoat, 'COMMAND_CODE_GOAT_API_KEY', 'https://api.commandcode.ai/alpha/billing'],

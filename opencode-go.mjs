@@ -19,7 +19,7 @@
 import { pathToFileURL } from 'node:url'
 import { BalanceError, emitReading, getJson, readOptions, run, windowOf } from './lib/contract.mjs'
 
-const PROVIDER = 'opencode-go'
+const PROVIDER = 'dsh-opencode-go'
 const BASE_URL = 'https://opencode.ai/zen/go/v1'
 const ENV_NAME = 'OPENCODE_API_KEY'
 
