@@ -20,7 +20,7 @@
  */
 
 import { pathToFileURL } from 'node:url'
-import { BalanceError, emitReading, getJson, readOptions, run, windowOf } from './lib/contract.mjs'
+import { BalanceError, emitReading, getJson, readOptions, refusedReading, run, windowOf } from './lib/contract.mjs'
 
 const PROVIDER = 'minimax-cn'
 const BASE_URL = 'https://www.minimax.cn'
@@ -124,8 +124,14 @@ export function parse(payload, { model } = {}) {
  * @returns the reading.
  */
 export async function readBalance({ key, baseUrl, timeoutMs, model, fetch: fetchImpl }) {
-  const payload = await getJson(`${baseUrl}/v1/token_plan/remains`, { key, timeoutMs, fetch: fetchImpl })
-  return { reading: parse(payload, { model }), payload }
+  try {
+    const payload = await getJson(`${baseUrl}/v1/token_plan/remains`, { key, timeoutMs, fetch: fetchImpl })
+    return { reading: parse(payload, { model }), payload }
+  } catch (error) {
+    const refused = refusedReading(error)
+    if (refused === undefined) throw error
+    return { reading: refused }
+  }
 }
 
 async function main() {

@@ -116,7 +116,7 @@ route, so combine these with `pools` — see that plugin's README.
 |---|---|---|---|---|---|
 | `deepseek.mjs` | `deepseek-official` | `DEEPSEEK_API_KEY` | `GET api.deepseek.com/user/balance` | the CNY wallet's `total_balance` (the first wallet when there is no CNY one) | yes |
 | `opencode-go.mjs` | `dsh-opencode-go` | `OPENCODE_API_KEY` | `GET opencode.ai/zen/go/v1/usage` | `100 − max(percent used)` over the rolling, weekly, and monthly windows; a window marked `rate-limited` reads `0` | no — the call `dsh-opencode-go` itself makes |
-| `kimi-coding.mjs` | `kimi-coding` | `KIMI_CODING_API_KEY` | `GET api.kimi.com/coding/v1/usages` (404 falls back to `/v1/usage`) | the least remaining percentage across the limit rows, or the least remaining count when no row carries one | no — a community client's call |
+| `kimi-coding.mjs` | `kimi-coding` | `KIMI_CODING_API_KEY` | `GET api.kimi.com/coding/v1/usages` (404 falls back to `/v1/usage`) | the least remaining across every window the response carries — the `limits` windows, the `usage` summary, and the 5-hour and 7-day `usages` shares, a window one source already reported not reported again — as a percentage where any window states one, otherwise as the least remaining count | no — a community client's call, which records its measured shape |
 | `minimax.mjs` | `minimax-cn` | `MINIMAX_CN_API_KEY` (or `MINIMAX_TOKEN_PLAN_KEY`) | `GET www.minimax.cn/v1/token_plan/remains` | the smaller of the language-model resources' current-interval and weekly windows; `--model` narrows to one resource | endpoint only — the fields follow the community client |
 | `command-code-goat.mjs` | `command-code-goat` | `COMMAND_CODE_GOAT_API_KEY` | `GET api.commandcode.ai/alpha/billing/credits` | the **tightest** of the monthly credit and the five-hour and weekly windows, in dollars | endpoint only — the fields follow the response it answers with |
 | `qwen.mjs` | `qwen` | `QWEN_CONSOLE_COOKIE` (or `BAILIAN_CONSOLE_COOKIE`) — a **console session cookie**, not an API key | the console data gateway (`POST cs-data.qianwenai.com/data/api.json`), `tokenplan/personal/api/v2` | percent left of the period the plan meters — the month since the 2026-09 billing change, a week for a subscription still metering weekly — with the tier's Credit total in `detail` | no — the console's own front end, see below |
@@ -124,13 +124,23 @@ route, so combine these with `pools` — see that plugin's README.
 Every script but `deepseek.mjs` also reports those allowances one window at a
 time: `opencode-go.mjs` its `rolling`, `weekly`, and `monthly` windows as percent
 left out of 100, `minimax.mjs` the `current` and `weekly` window of each selected
-resource under that window's own label, `kimi-coding.mjs` one window per usage
-row named `limit-1`, `limit-2`, … in row order, `qwen.mjs` the `monthly`,
+resource under that window's own label, `kimi-coding.mjs` one window per
+allowance, named `five-hour` or `weekly` where the payload states that window's own
+length and `limit-1`, `limit-2`, … in row order where it does not, `qwen.mjs` the `monthly`,
 `weekly`, or `five-hour` period the plan meters, whichever the console reports a
 reading for, and `command-code-goat.mjs` its `monthly`, `five-hour`, and `weekly`
 allowances, of which only the last two carry the endpoint's `cap`. A prepaid
 wallet (`deepseek.mjs`) has no window: the pool row's own unit and threshold are
 what measure it.
+
+Every script answers a credential the endpoint refused — HTTP 401 or 403 — with
+`remaining` `0` and the reason on `error`. A key the endpoint will not
+authenticate can serve nothing, so its route should leave the pool rather than be
+drawn as if it still had headroom, and `error` keeps the number honest: a report
+shows that this is a refused credential rather than a spent one. Every other
+failure — an unreachable host, a timeout, a body that is not the payload the
+script reads — stays a failure and a non-zero exit, because those say nothing
+about the allowance.
 
 `minimax.mjs` is a port of a `minimax_quota.py` console report written earlier
 for this deployment; both record the same reverse-engineered field names.

@@ -18,7 +18,7 @@
  */
 
 import { pathToFileURL } from 'node:url'
-import { BalanceError, emitReading, getJson, readOptions, run, windowOf } from './lib/contract.mjs'
+import { BalanceError, emitReading, getJson, readOptions, refusedReading, run, windowOf } from './lib/contract.mjs'
 
 const PROVIDER = 'command-code-goat'
 const BASE_URL = 'https://api.commandcode.ai/alpha/billing'
@@ -101,8 +101,14 @@ export function parse(payload) {
  * @returns the reading.
  */
 export async function readBalance({ key, baseUrl, timeoutMs, fetch: fetchImpl }) {
-  const payload = await getJson(`${baseUrl}/credits`, { key, timeoutMs, fetch: fetchImpl })
-  return { reading: parse(payload), payload }
+  try {
+    const payload = await getJson(`${baseUrl}/credits`, { key, timeoutMs, fetch: fetchImpl })
+    return { reading: parse(payload), payload }
+  } catch (error) {
+    const refused = refusedReading(error)
+    if (refused === undefined) throw error
+    return { reading: refused }
+  }
 }
 
 async function main() {

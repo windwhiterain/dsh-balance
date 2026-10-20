@@ -14,7 +14,7 @@
  */
 
 import { pathToFileURL } from 'node:url'
-import { BalanceError, emitReading, getJson, readOptions, run } from './lib/contract.mjs'
+import { BalanceError, emitReading, getJson, readOptions, refusedReading, run } from './lib/contract.mjs'
 
 const PROVIDER = 'deepseek-official'
 const BASE_URL = 'https://api.deepseek.com'
@@ -50,8 +50,14 @@ export function parse(payload) {
  * @returns the reading.
  */
 export async function readBalance({ key, baseUrl, timeoutMs, fetch: fetchImpl }) {
-  const payload = await getJson(`${baseUrl}/user/balance`, { key, timeoutMs, fetch: fetchImpl })
-  return { reading: parse(payload), payload }
+  try {
+    const payload = await getJson(`${baseUrl}/user/balance`, { key, timeoutMs, fetch: fetchImpl })
+    return { reading: parse(payload), payload }
+  } catch (error) {
+    const refused = refusedReading(error)
+    if (refused === undefined) throw error
+    return { reading: refused }
+  }
 }
 
 async function main() {

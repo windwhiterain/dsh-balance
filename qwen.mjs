@@ -39,7 +39,7 @@
  */
 
 import { pathToFileURL } from 'node:url'
-import { BalanceError, emitReading, postFormJson, readOptions, run, windowOf } from './lib/contract.mjs'
+import { BalanceError, emitReading, postFormJson, readOptions, refusedReading, run, windowOf } from './lib/contract.mjs'
 
 const PROVIDER = 'qwen'
 const GATEWAY_URL = 'https://cs-data.qianwenai.com/data/api.json'
@@ -222,15 +222,21 @@ export async function callGateway(inner, { cookie, secToken, baseUrl = GATEWAY_U
  * @param options - the session cookie as `key`, plus the endpoint, timeout,
  *   optional CSRF token, and an injectable fetch.
  * @returns the reading and every body it was read from.
- * @throws {BalanceError} when the session is refused or no period is metered.
+ * @throws {BalanceError} when no period is metered.
  */
 export async function readBalance({ key, baseUrl, timeoutMs, secToken, fetch: fetchImpl = fetch }) {
-  const token = secToken ?? cookieValue(key, 'sec_token')
-    ?? await readSecToken(key, { timeoutMs, fetch: fetchImpl })
-  const usage = await callGateway('usage', { cookie: key, secToken: token, baseUrl, timeoutMs, fetch: fetchImpl })
-  const quota = await optionalGateway('quota-config', { cookie: key, secToken: token, baseUrl, timeoutMs, fetch: fetchImpl })
-  const subscription = await optionalGateway('subscription', { cookie: key, secToken: token, baseUrl, timeoutMs, fetch: fetchImpl })
-  return { reading: parse(usage, quota, subscription), payload: { usage, quota, subscription } }
+  try {
+    const token = secToken ?? cookieValue(key, 'sec_token')
+      ?? await readSecToken(key, { timeoutMs, fetch: fetchImpl })
+    const usage = await callGateway('usage', { cookie: key, secToken: token, baseUrl, timeoutMs, fetch: fetchImpl })
+    const quota = await optionalGateway('quota-config', { cookie: key, secToken: token, baseUrl, timeoutMs, fetch: fetchImpl })
+    const subscription = await optionalGateway('subscription', { cookie: key, secToken: token, baseUrl, timeoutMs, fetch: fetchImpl })
+    return { reading: parse(usage, quota, subscription), payload: { usage, quota, subscription } }
+  } catch (error) {
+    const refused = refusedReading(error)
+    if (refused === undefined) throw error
+    return { reading: refused }
+  }
 }
 
 /**
