@@ -148,7 +148,7 @@ check('kimi-coding: percentages outrank counts, and limit/used is subtracted', (
 })
 
 check('kimi-coding: the live payload reads every window it carries, once each', () => {
-  // The measured shape (2026-10-19): four top-level keys, of which three carry
+  // The measured shape (2026-10-24): four top-level keys, of which three carry
   // allowances. A reading that leaves the weekly summary or the usage shares out
   // reports the five-hour window alone and calls a spent account full.
   const reading = parseKimi({
@@ -158,27 +158,33 @@ check('kimi-coding: the live payload reads every window it carries, once each', 
       detail: { limit: '100', remaining: '100' },
     }],
     usage: { limit: '100', remaining: '84' },
-    usages: { limit_5h: { used_ratio: 0 }, limit_7d: { used_ratio: 0.1631 } },
+    usages: {
+      limit_5h: { used_ratio: 0 },
+      limit_month_total: { used_ratio: 1 },
+      limit_month_code: { used_ratio: 0.9907 },
+    },
   })
-  assert.equal(reading.remaining, 84, 'the weekly summary is the tightest of the windows the payload carries')
+  assert.equal(reading.remaining, 0, 'a spent monthly window decides even when the summary has room')
   assert.deepEqual(reading.windows, [
     { name: 'five-hour', remaining: 100, capacity: 100 },
     { name: 'weekly', remaining: 84, capacity: 100 },
+    { name: 'limit_month_total', remaining: 0, capacity: 100 },
+    { name: 'limit_month_code', remaining: 0.93, capacity: 100 },
   ], 'a window limits already produced is not reported again from usages')
 })
 
 check('kimi-coding: the usage shares stand in when the other two are absent', () => {
   const reading = parseKimi({ usages: { limit_5h: { used_ratio: 0 }, limit_7d: { used_ratio: 0.1631 } } })
-  assert.equal(reading.remaining, 0, 'the tighter of the two shares decides')
+  assert.equal(reading.remaining, 83.69, 'the tighter of the two shares decides')
   assert.deepEqual(reading.windows, [
-    { name: 'five-hour', remaining: 0, capacity: 100 },
-    { name: 'weekly', remaining: 16.31, capacity: 100 },
+    { name: 'five-hour', remaining: 100, capacity: 100 },
+    { name: 'weekly', remaining: 83.69, capacity: 100 },
   ], 'a used_ratio is the share already spent, so what is left is its complement')
-  assert.match(reading.detail, /least remaining 0%/)
+  assert.match(reading.detail, /least remaining 83\.69%/)
 
   assert.equal(
     parseKimi({ usages: { limit_7d: { used_ratio: 3.5 } } }).remaining,
-    100,
+    0,
     'a share past the whole window clamps instead of reporting more than full',
   )
   assert.throws(() => parseKimi({ usages: { limit_7d: {} } }), throws, 'a share window with no ratio is not an amount')

@@ -6,12 +6,15 @@
  * 404) answers with exactly four top-level keys — `booster_wallet`, `limits`,
  * `usage`, and `usages` — and no others. `limits` carries one entry per rate-limit
  * window with the window's own `window.duration`/`window.timeUnit` beside the
- * amounts; `usage` is the current window's summary; `usages` carries the 5-hour
- * and 7-day shares already spent as `used_ratio` in 0–1. Every one of those is an
- * allowance that can refuse a request, so a reading that leaves any of them out
- * reports more headroom than the account has. A window one source already
- * reported is not reported again, which is what keeps the two overlapping sources
- * from counting the same window twice.
+ * amounts; `usage` is the current window's summary; `usages` carries one share
+ * already spent per window as `used_ratio` in 0–1, under a key of the provider's
+ * choosing — this plan names `limit_5h`, `limit_month_total`, and
+ * `limit_month_code`. Every one of those is an allowance that can refuse a
+ * request, so a reading that leaves any of them out reports more headroom than
+ * the account has, and a reading that takes a *used* share for what is left
+ * reports the opposite. A window one source already reported is not reported
+ * again, which is what keeps the overlapping sources from counting the same
+ * window twice.
  *
  * A row may report `remaining` outright, or `limit` and `used` for the reading to
  * subtract, or a remaining percentage. Percentages win when any row carries one,
@@ -45,6 +48,9 @@ const HEADERS = Object.freeze({ 'user-agent': 'KimiCLI/1.6' })
 
 /** The rate-limit window each length of minutes names, so one window is not reported twice. */
 const WINDOW_NAMES = new Map([[300, 'five-hour'], [10_080, 'weekly']])
+
+/** The window a known `usages` key names; any other key is its own window name. */
+const USAGE_WINDOW_NAMES = new Map([['limit_5h', 'five-hour'], ['limit_7d', 'weekly']])
 
 /**
  * The length of one rate-limit window in minutes.
@@ -143,22 +149,24 @@ export function parse(payload) {
     take(row.detail, name ?? `limit-${considered}`)
   }
 
-  // `usage` is the current window's own summary and `usages` states the 5-hour
-  // and 7-day shares already spent. The endpoint answers with both, so a window
-  // one of them already reported is left alone rather than counted twice.
+  // `usage` is the current window's own summary and `usages` states, per key, the
+  // share already spent in that window. The provider names as many of those as the
+  // plan meters, so every entry is read rather than a fixed pair, and a window one
+  // source already reported is left alone rather than counted twice.
   if (payload?.usage !== null && typeof payload?.usage === 'object' && !reported.has('weekly')) {
     considered += 1
     if (take(payload.usage, 'weekly')) reported.add('weekly')
   }
   const usages = payload?.usages !== null && typeof payload?.usages === 'object' ? payload.usages : undefined
-  for (const [name, key] of [['five-hour', 'limit_5h'], ['weekly', 'limit_7d']]) {
-    if (usages === undefined || reported.has(name)) continue
-    const ratio = Number(usages[key]?.used_ratio)
+  for (const [key, entry] of Object.entries(usages ?? {})) {
+    const ratio = Number(entry?.used_ratio)
     if (!Number.isFinite(ratio)) continue
+    const name = USAGE_WINDOW_NAMES.get(key) ?? key
+    if (reported.has(name)) continue
     // The share is already spent, so what is left is its complement; a share past
     // the whole window clamps rather than reporting more than full, and a share of
     // the period is not more precise than a hundredth of a percent.
-    const remaining = Math.round(Math.min(100, Math.max(0, ratio * 100)) * 100) / 100
+    const remaining = Math.round((1 - Math.min(1, Math.max(0, ratio))) * 10_000) / 100
     considered += 1
     reported.add(name)
     percentages.push(remaining)
